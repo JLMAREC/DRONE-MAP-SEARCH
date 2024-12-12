@@ -1,0 +1,92 @@
+.card {
+    padding: 16px;
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    border: 1px solid #e5e7eb;
+    margin-bottom: 16px;
+  }
+  
+  .inputContainer {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+    align-items: center;
+  }
+  
+  .textInput {
+    flex: 1;
+    padding: 8px;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+  }
+  
+  .colorInput {
+    width: 40px;
+    height: 40px;
+    border-radius: 4px;
+    border: 1px solid #e5e7eb;
+  }
+  
+  .metricsContainer {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+    background-color: #f9fafb;
+    padding: 12px;
+    border-radius: 4px;
+  }
+  
+  .metricLabel {
+    font-size: 14px;
+    color: #6b7280;
+  }
+  
+  .metricValue {
+    font-weight: 500;
+  }
+  
+  .buttonContainer {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .primaryButton {
+    width: 100%;
+    padding: 8px;
+    background-color: #1a2742;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  
+  .completeButton {
+    width: 100%;
+    padding: 8px;
+    background-color: #22c55e;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  
+  .deleteButton {
+    width: 100%;
+    padding: 8px;
+    color: #dc2626;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  
+  .completedInfo {
+    padding: 12px;
+    background-color: #f9fafb;
+    border-radius: 4px;
+    font-size: 14px;
+    color: #6b7280;
+  }
