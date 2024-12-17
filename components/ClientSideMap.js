@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { positionIcon, victimIcon, createLabelIcon } from './icons';
 import { useMap } from 'react-leaflet';
 import DrawControl from './DrawControl';
+import { useSettings } from '../context/SettingsContext';
 
 const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then((mod) => mod.TileLayer), { ssr: false });
@@ -13,6 +14,10 @@ const Circle = dynamic(() => import('react-leaflet').then((mod) => mod.Circle), 
 const Tooltip = dynamic(() => import('react-leaflet').then((mod) => mod.Tooltip), { ssr: false });
 const Polygon = dynamic(() => import('react-leaflet').then((mod) => mod.Polygon), { ssr: false });
 const FeatureGroup = dynamic(() => import('react-leaflet').then((mod) => mod.FeatureGroup), { ssr: false });
+
+const generateTeamId = () => {
+  return `team-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+};
 
 function MapController({ center, zoom }) {
   const map = useMap();
@@ -52,6 +57,51 @@ const Legend = ({ zones }) => {
   );
 };
 
+const WhatsAppShareButton = ({ victimLocation, searchRadius }) => {
+  const { settings } = useSettings();
+
+  const handleShare = () => {
+    if (!settings.whatsappNumber) {
+      alert('Veuillez configurer un numéro WhatsApp dans les paramètres');
+      return;
+    }
+
+    const message = `
+🚨 *RECHERCHE DE VICTIME - SDIS 56*
+
+📍 *DERNIÈRE POSITION CONNUE*
+${victimLocation ? `${victimLocation[0]}, ${victimLocation[1]}` : 'Non définie'}
+
+⭕ *ZONES DE RECHERCHE*
+- Zone prioritaire : 500m
+- Zone élargie : ${searchRadius/1000}km
+
+🔍 *LIENS UTILES*
+- Voir la carte en direct : ${window.location.href}
+- Partager votre position : ${window.location.origin}/share/${generateTeamId()}
+
+⚠️ Instructions :
+1. Utilisez le lien "Voir la carte" pour suivre l'opération
+2. Utilisez le lien "Partager position" pour transmettre votre localisation
+
+SDIS 56 - Cellule Appui Drone`;
+
+    window.open(`https://wa.me/${settings.whatsappNumber}?text=${encodeURIComponent(message)}`, '_blank');
+  };
+
+  return (
+    <button 
+      onClick={handleShare}
+      className="w-full flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white py-3 px-4 rounded-lg transition-colors"
+    >
+      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347"/>
+      </svg>
+      Partager sur WhatsApp
+    </button>
+  );
+};
+
 const MapControllerWrapper = ({ center, zoom }) => {
   const MapControllerWithNoSSR = dynamic(
     () => Promise.resolve(MapController),
@@ -59,7 +109,6 @@ const MapControllerWrapper = ({ center, zoom }) => {
   );
   return <MapControllerWithNoSSR center={center} zoom={zoom} />;
 };
-
 export default function ClientSideMap({ 
   center, 
   zoom,
