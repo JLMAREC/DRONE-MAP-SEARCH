@@ -1,38 +1,52 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
-import Layout from '../../components/Layout';
 
 export default function ShareLocation() {
   const router = useRouter();
   const { teamId } = router.query;
-  const [status, setStatus] = useState('waiting'); // waiting, tracking, error
-  const [position, setPosition] = useState(null);
+  const [isSharing, setIsSharing] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!teamId) return;
 
+    // Vérifier si la géolocalisation est disponible
     if ("geolocation" in navigator) {
-      setStatus('tracking');
-      
-      // Suivre la position en continu
+      setIsSharing(true);
+      setError(null);
+
+      // Commencer à suivre la position
       const watchId = navigator.geolocation.watchPosition(
-        (position) => {
-          const newPosition = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-            accuracy: position.coords.accuracy,
-            timestamp: new Date(),
-            teamId: teamId
-          };
-          setPosition(newPosition);
-          setStatus('tracking');
-          
-          // Ici vous pourrez ajouter la logique pour envoyer la position au PC
-          console.log("Position mise à jour:", newPosition);
+        async (position) => {
+          const { latitude, longitude } = position.coords;
+          try {
+            // Envoyer la position au serveur
+            const response = await fetch('/api/update-position', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                teamId,
+                latitude,
+                longitude,
+                timestamp: new Date()
+              })
+            });
+
+            if (!response.ok) {
+              throw new Error('Erreur lors de la mise à jour de la position');
+            }
+          } catch (error) {
+            console.error('Erreur de partage de position:', error);
+            setError('Erreur lors de la mise à jour de la position');
+            setIsSharing(false);
+          }
         },
         (error) => {
-          console.error("Erreur de géolocalisation:", error);
-          setStatus('error');
+          console.error('Erreur de géolocalisation:', error);
+          setError('Impossible d\'accéder à votre position. Vérifiez vos paramètres de localisation.');
+          setIsSharing(false);
         },
         {
           enableHighAccuracy: true,
@@ -44,68 +58,57 @@ export default function ShareLocation() {
       // Nettoyer le watch quand le composant est démonté
       return () => {
         navigator.geolocation.clearWatch(watchId);
+        setIsSharing(false);
       };
     } else {
-      setStatus('error');
+      setError('La géolocalisation n\'est pas supportée par votre appareil');
+      setIsSharing(false);
     }
   }, [teamId]);
 
   return (
-    <Layout>
-      <div className="min-h-screen bg-gray-50">
-        <div className="max-w-md mx-auto p-6">
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <h1 className="text-xl font-bold text-[#1a2742] mb-4">
-              Partage de Position SDIS 56
-            </h1>
-
-            {status === 'waiting' && (
-              <div className="text-center p-4">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1a2742] mx-auto"></div>
-                <p className="mt-2">Initialisation...</p>
-              </div>
-            )}
-
-            {status === 'tracking' && (
-              <div className="space-y-4">
-                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                  <div className="flex items-center gap-2 text-green-700">
-                    <div className="h-2 w-2 bg-green-500 rounded-full animate-pulse"></div>
-                    <span className="font-medium">Position en cours de partage</span>
-                  </div>
-                </div>
-
-                {position && (
-                  <div className="space-y-2 text-sm text-gray-600">
-                    <p>Dernière mise à jour : {new Date(position.timestamp).toLocaleTimeString()}</p>
-                    <p>Précision : ±{Math.round(position.accuracy)}m</p>
-                  </div>
-                )}
-
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <p className="text-sm text-blue-700">
-                    Gardez cette page ouverte pour continuer le partage de position.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {status === 'error' && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                <p className="text-red-700">
-                  Impossible d'activer la géolocalisation. Vérifiez que vous avez autorisé l'accès à votre position.
-                </p>
-                <button
-                  onClick={() => window.location.reload()}
-                  className="mt-4 w-full bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700"
-                >
-                  Réessayer
-                </button>
-              </div>
-            )}
-          </div>
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6">
+        <div className="text-center mb-6">
+          <h1 className="text-2xl font-bold text-[#1a2742]">
+            SDIS 56 - Cellule Appui Drone
+          </h1>
+          <p className="text-gray-600 mt-2">Partage de Position</p>
         </div>
+
+        {isSharing ? (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+            <div className="flex items-center gap-2 text-green-700 justify-center">
+              <div className="h-3 w-3 bg-green-500 rounded-full animate-pulse"></div>
+              <span className="font-medium">Position en cours de partage</span>
+            </div>
+            <div className="mt-4 text-sm text-green-600 text-center">
+              <p>Votre position est transmise au PC</p>
+              <p className="mt-2 font-medium">
+                Gardez cette page ouverte pour continuer le partage
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <div className="flex items-center gap-2 text-red-700 justify-center">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <span className="font-medium">Erreur de partage</span>
+            </div>
+            <p className="mt-2 text-sm text-red-600 text-center">
+              {error || "Une erreur est survenue lors du partage de position"}
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 w-full bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 transition-colors"
+            >
+              Réessayer
+            </button>
+          </div>
+        )}
       </div>
-    </Layout>
+    </div>
   );
 }

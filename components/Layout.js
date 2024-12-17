@@ -1,20 +1,35 @@
 import { useState } from 'react';
 
 export default function Layout({ children }) {
-  const handleShare = () => {
+  const handleShare = async () => {
     const phoneNumber = prompt("Entrez le numéro de téléphone du destinataire (ex: 0612345678):");
     if (!phoneNumber) return;
 
     const formattedNumber = phoneNumber.replace(/^0/, '33').replace(/\D/g, '');
     
-    const baseUrl = window.location.href.replace('http://', 'https://');
-    const shareUrl = `https://${window.location.host}/share/team-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    // Obtenir l'adresse depuis les coordonnées
+    const getAddress = async (lat, lon) => {
+      try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`);
+        const data = await response.json();
+        return data.display_name;
+      } catch (error) {
+        console.error('Erreur de géocodage:', error);
+        return `${lat}, ${lon}`;
+      }
+    };
+    
+    const coords = [47.6578, -2.7604]; // Exemple de coordonnées
+    const address = await getAddress(coords[0], coords[1]);
+    const baseUrl = window.location.origin;
+    const mapUrl = `${baseUrl}/map-view`;
+    const shareUrl = `${baseUrl}/share/team-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    const message = `🚨 *RECHERCHE DE VICTIME - SDIS 56 DRONE*
+    const message = `🚨 *RECHERCHE DE VICTIME - SDIS 56*
 
 📍 *DERNIÈRE POSITION*
-
-${baseUrl}
+${address}
+Coordonnées GPS : ${coords[0]}, ${coords[1]}
 
 ⭕ *ZONES DE RECHERCHE*
  - Zone prioritaire : 500m
@@ -23,7 +38,7 @@ ${baseUrl}
 🔗 *LIENS UTILES*
 
 📱 Carte en direct :
-${baseUrl}
+${mapUrl}
 
 📍 Partager votre position :
 ${shareUrl}
@@ -31,7 +46,7 @@ ${shareUrl}
 _SDIS 56 - Cellule Appui Drone_`;
 
     window.open(`https://api.whatsapp.com/send?phone=${formattedNumber}&text=${encodeURIComponent(message)}`, '_blank');
-  };
+};
 
   return (
     <div className="flex flex-col h-screen">
