@@ -10,7 +10,7 @@ export default function Layout({ children }) {
     const baseUrl = window.location.href.replace('http://', 'https://');
     const shareUrl = `https://${window.location.host}/share/team-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    const message = `🚨 *RECHERCHE DE VICTIME - SDIS 56*
+    const message = `🚨 *RECHERCHE DE VICTIME - SDIS 56 DRONE*
 
 📍 *DERNIÈRE POSITION*
 
