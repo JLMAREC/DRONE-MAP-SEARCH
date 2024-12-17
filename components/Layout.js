@@ -1,12 +1,23 @@
 import { useState } from 'react';
 
-export default function Layout({ children }) {
+export default function Layout({ children, victimLocation, zones, searchRadius }) {
   const handleShare = async () => {
     const phoneNumber = prompt("Entrez le numéro de téléphone du destinataire (ex: 0612345678):");
     if (!phoneNumber) return;
 
     const formattedNumber = phoneNumber.replace(/^0/, '33').replace(/\D/g, '');
     
+    // Création des URLs avec les paramètres
+    const baseUrl = window.location.origin;
+    const mapData = encodeURIComponent(JSON.stringify({
+      victim: victimLocation,
+      searchRadius: searchRadius,
+      zones: zones
+    }));
+    
+    const mapUrl = `${baseUrl}/map-view?data=${mapData}`;
+    const shareUrl = `${baseUrl}/share/team-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
     // Obtenir l'adresse depuis les coordonnées
     const getAddress = async (lat, lon) => {
       try {
@@ -18,22 +29,18 @@ export default function Layout({ children }) {
         return `${lat}, ${lon}`;
       }
     };
-    
-    const coords = [47.6578, -2.7604]; // Exemple de coordonnées
-    const address = await getAddress(coords[0], coords[1]);
-    const baseUrl = window.location.origin;
-    const mapUrl = `${baseUrl}/map-view`;
-    const shareUrl = `${baseUrl}/share/team-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    const address = victimLocation ? await getAddress(victimLocation[0], victimLocation[1]) : 'Non définie';
 
     const message = `🚨 *RECHERCHE DE VICTIME - SDIS 56*
 
 📍 *DERNIÈRE POSITION*
 ${address}
-Coordonnées GPS : ${coords[0]}, ${coords[1]}
+${victimLocation ? `Coordonnées GPS : ${victimLocation[0]}, ${victimLocation[1]}` : ''}
 
 ⭕ *ZONES DE RECHERCHE*
  - Zone prioritaire : 500m
- - Zone élargie : 0km
+ - Zone élargie : ${searchRadius/1000}km
 
 🔗 *LIENS UTILES*
 
@@ -46,7 +53,7 @@ ${shareUrl}
 _SDIS 56 - Cellule Appui Drone_`;
 
     window.open(`https://api.whatsapp.com/send?phone=${formattedNumber}&text=${encodeURIComponent(message)}`, '_blank');
-};
+  };
 
   return (
     <div className="flex flex-col h-screen">
@@ -75,6 +82,113 @@ _SDIS 56 - Cellule Appui Drone_`;
       <main className="flex-1 flex overflow-hidden">
         {children}
       </main>
+    </div>
+  );
+}
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/router';
+
+export default function ShareLocation() {
+  const router = useRouter();
+  const { teamId } = router.query;
+  const [isSharing, setIsSharing] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!teamId) return;
+
+    if ("geolocation" in navigator) {
+      setIsSharing(true);
+      
+      const watchId = navigator.geolocation.watchPosition(
+        async (position) => {
+          try {
+            const { latitude, longitude } = position.coords;
+            // Stocker la position dans localStorage pour le développement local
+            localStorage.setItem('team_position', JSON.stringify({
+              teamId,
+              latitude,
+              longitude,
+              timestamp: new Date().toISOString()
+            }));
+
+            // Envoyer la position au PC
+            const response = await fetch('/api/update-position', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                teamId,
+                latitude,
+                longitude,
+                timestamp: new Date().toISOString()
+              })
+            });
+
+            if (!response.ok) {
+              throw new Error('Erreur lors de la mise à jour de la position');
+            }
+          } catch (error) {
+            console.error('Erreur:', error);
+            setError('Erreur de mise à jour de la position');
+          }
+        },
+        (error) => {
+          console.error('Erreur de géolocalisation:', error);
+          setIsSharing(false);
+          setError('Erreur de géolocalisation');
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 5000,
+          maximumAge: 0
+        }
+      );
+
+      return () => {
+        navigator.geolocation.clearWatch(watchId);
+        setIsSharing(false);
+      };
+    } else {
+      setError('Géolocalisation non supportée');
+    }
+  }, [teamId]);
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6">
+        <div className="text-center mb-6">
+          <h1 className="text-2xl font-bold text-[#1a2742]">
+            SDIS 56 - Cellule Appui Drone
+          </h1>
+          <p className="text-gray-600 mt-2">Partage de Position</p>
+        </div>
+
+        {isSharing ? (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+            <div className="flex items-center gap-2 justify-center text-green-700">
+              <div className="h-3 w-3 bg-green-500 rounded-full animate-pulse"></div>
+              <span className="font-medium">Position en cours de partage</span>
+            </div>
+            <p className="mt-4 text-sm text-green-600 text-center">
+              Gardez cette page ouverte pour continuer le partage
+            </p>
+          </div>
+        ) : (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <p className="text-red-700 text-center">
+              {error || "Une erreur est survenue"}
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 w-full bg-red-600 text-white py-2 rounded-lg hover:bg-red-700"
+            >
+              Réessayer
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

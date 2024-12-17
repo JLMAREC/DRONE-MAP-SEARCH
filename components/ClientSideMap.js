@@ -5,7 +5,6 @@ import dynamic from 'next/dynamic';
 import { positionIcon, victimIcon, createLabelIcon } from './icons';
 import { useMap } from 'react-leaflet';
 import DrawControl from './DrawControl';
-import { useSettings } from '../context/SettingsContext';
 
 const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then((mod) => mod.TileLayer), { ssr: false });
@@ -15,9 +14,17 @@ const Tooltip = dynamic(() => import('react-leaflet').then((mod) => mod.Tooltip)
 const Polygon = dynamic(() => import('react-leaflet').then((mod) => mod.Polygon), { ssr: false });
 const FeatureGroup = dynamic(() => import('react-leaflet').then((mod) => mod.FeatureGroup), { ssr: false });
 
-const generateTeamId = () => {
-  return `team-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-};
+// Icône pour les équipes sur le terrain
+const teamIcon = new L.DivIcon({
+  html: `<div class="flex items-center justify-center w-8 h-8 bg-blue-600 rounded-full border-2 border-white shadow-lg">
+    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+    </svg>
+  </div>`,
+  className: 'team-icon',
+  iconSize: [32, 32],
+  iconAnchor: [16, 32]
+});
 
 function MapController({ center, zoom }) {
   const map = useMap();
@@ -28,7 +35,6 @@ function MapController({ center, zoom }) {
   }, [center, map]);
   return null;
 }
-
 const Legend = ({ zones }) => {
   const calculateTotalArea = (zones) => {
     if (!zones || zones.length === 0) return "0.00";
@@ -36,7 +42,7 @@ const Legend = ({ zones }) => {
   };
 
   return (
-    <div className="absolute bottom-4 right-4 bg-white p-4 rounded-lg shadow-md z-[1000]">
+    <div className="absolute bottom-20 right-4 bg-white p-4 rounded-lg shadow-md z-[1000]">
       <h4 className="text-[#1a2742] font-bold mb-3">Types de zones</h4>
       <div className="space-y-2">
         <div className="flex items-center gap-2">
@@ -57,51 +63,6 @@ const Legend = ({ zones }) => {
   );
 };
 
-const WhatsAppShareButton = ({ victimLocation, searchRadius }) => {
-  const { settings } = useSettings();
-
-  const handleShare = () => {
-    if (!settings.whatsappNumber) {
-      alert('Veuillez configurer un numéro WhatsApp dans les paramètres');
-      return;
-    }
-
-    const message = `
-🚨 *RECHERCHE DE VICTIME - SDIS 56*
-
-📍 *DERNIÈRE POSITION CONNUE*
-${victimLocation ? `${victimLocation[0]}, ${victimLocation[1]}` : 'Non définie'}
-
-⭕ *ZONES DE RECHERCHE*
-- Zone prioritaire : 500m
-- Zone élargie : ${searchRadius/1000}km
-
-🔍 *LIENS UTILES*
-- Voir la carte en direct : ${window.location.href}
-- Partager votre position : ${window.location.origin}/share/${generateTeamId()}
-
-⚠️ Instructions :
-1. Utilisez le lien "Voir la carte" pour suivre l'opération
-2. Utilisez le lien "Partager position" pour transmettre votre localisation
-
-SDIS 56 - Cellule Appui Drone`;
-
-    window.open(`https://wa.me/${settings.whatsappNumber}?text=${encodeURIComponent(message)}`, '_blank');
-  };
-
-  return (
-    <button 
-      onClick={handleShare}
-      className="w-full flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white py-3 px-4 rounded-lg transition-colors"
-    >
-      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347"/>
-      </svg>
-      Partager sur WhatsApp
-    </button>
-  );
-};
-
 const MapControllerWrapper = ({ center, zoom }) => {
   const MapControllerWithNoSSR = dynamic(
     () => Promise.resolve(MapController),
@@ -109,6 +70,7 @@ const MapControllerWrapper = ({ center, zoom }) => {
   );
   return <MapControllerWithNoSSR center={center} zoom={zoom} />;
 };
+
 export default function ClientSideMap({ 
   center, 
   zoom,
@@ -118,12 +80,15 @@ export default function ClientSideMap({
   zoneColor = '#1a2742',
   victimLocation,
   onVictimLocationSet,
-  victimTimestamp
+  victimTimestamp,
+  viewOnly = false
 }) {
   const [map, setMap] = useState(null);
   const [L, setL] = useState(null);
+  const [teamPositions, setTeamPositions] = useState(new Map());
   const defaultCenter = [47.6578, -2.7604];
 
+  // Initialisation de Leaflet et mise en place des effets
   useEffect(() => {
     const initLeaflet = async () => {
       const L = await import('leaflet');
@@ -142,15 +107,37 @@ export default function ClientSideMap({
 
     initLeaflet();
   }, []);
+  // Mise à jour des positions des équipes
+  useEffect(() => {
+    const checkTeamPositions = async () => {
+      try {
+        const storedPositions = localStorage.getItem('team_position');
+        if (storedPositions) {
+          const position = JSON.parse(storedPositions);
+          setTeamPositions(new Map([[position.teamId, position]]));
+        }
 
-  const getZoneStyle = (zone) => ({
-    color: zone.color,
-    weight: 2,
-    opacity: 1,
-    fillOpacity: 0.1,
-    fillColor: zone.color,
-    dashArray: zone.completed ? '10, 10' : null
-  });
+        if (process.env.NODE_ENV === 'production') {
+          const response = await fetch('/api/get-positions');
+          if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+              const positionsMap = new Map();
+              data.data.forEach(pos => {
+                positionsMap.set(pos.teamId, pos);
+              });
+              setTeamPositions(positionsMap);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Erreur lors de la récupération des positions:', error);
+      }
+    };
+
+    const interval = setInterval(checkTeamPositions, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (typeof document !== 'undefined') {
@@ -170,6 +157,9 @@ export default function ClientSideMap({
           background: none !important;
           border: none !important;
         }
+        .team-icon {
+          z-index: 999 !important;
+        }
       `;
       document.head.appendChild(style);
       return () => document.head.removeChild(style);
@@ -179,6 +169,15 @@ export default function ClientSideMap({
   if (!L) {
     return <div>Chargement de la carte...</div>;
   }
+
+  const getZoneStyle = (zone) => ({
+    color: zone.color,
+    weight: 2,
+    opacity: 1,
+    fillOpacity: 0.1,
+    fillColor: zone.color,
+    dashArray: zone.completed ? '10, 10' : null
+  });
 
   const formatDistance = (distance) => {
     if (!distance) return '';
@@ -199,7 +198,7 @@ export default function ClientSideMap({
           attribution='&copy; OpenStreetMap contributors'
         />
         
-        <DrawControl onZoneCreated={onZoneCreated} />
+        {!viewOnly && <DrawControl onZoneCreated={onZoneCreated} />}
         
         {center && (
           <Marker 
@@ -212,15 +211,33 @@ export default function ClientSideMap({
 
         <MapControllerWrapper center={center} zoom={zoom} />
 
+        {/* Positions des équipes */}
+        {Array.from(teamPositions.values()).map((team) => (
+          <Marker
+            key={team.teamId}
+            position={[team.latitude, team.longitude]}
+            icon={teamIcon}
+          >
+            <Tooltip>
+              <div>
+                <strong>{`Équipe ${team.teamId.split('-')[0]}`}</strong>
+                <div className="text-sm">
+                  Dernière mise à jour: {new Date(team.timestamp).toLocaleTimeString()}
+                </div>
+              </div>
+            </Tooltip>
+          </Marker>
+        ))}
+
         {victimLocation && (
           <>
             <Marker 
               position={victimLocation} 
               icon={victimIcon}
-              draggable={true}
-              eventHandlers={{
+              draggable={!viewOnly}
+              eventHandlers={!viewOnly ? {
                 dragend: (e) => onVictimLocationSet([e.target.getLatLng().lat, e.target.getLatLng().lng])
-              }}
+              } : {}}
             >
               <Tooltip>
                 <div className="font-semibold text-red-600">Dernière position connue</div>
