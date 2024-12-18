@@ -6,46 +6,67 @@ export default function ShareLocation() {
   const { teamId } = router.query;
   const [isSharing, setIsSharing] = useState(false);
   const [error, setError] = useState(null);
+  const [lastPosition, setLastPosition] = useState(null);
 
   useEffect(() => {
     if (!teamId) return;
 
-    // Vérifier si la géolocalisation est disponible
     if ("geolocation" in navigator) {
       setIsSharing(true);
       setError(null);
 
-      // Commencer à suivre la position
       const watchId = navigator.geolocation.watchPosition(
         async (position) => {
-          const { latitude, longitude } = position.coords;
+          const locationData = {
+            teamId,
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy,
+            timestamp: new Date().toISOString()
+          };
+
+          setLastPosition(locationData);
+
           try {
-            // Envoyer la position au serveur
+            // Stocker en local pour le développement et comme backup
+            localStorage.setItem('team_position', JSON.stringify(locationData));
+
+            // Envoyer au serveur
             const response = await fetch('/api/update-position', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
               },
-              body: JSON.stringify({
-                teamId,
-                latitude,
-                longitude,
-                timestamp: new Date()
-              })
+              body: JSON.stringify(locationData)
             });
 
             if (!response.ok) {
-              throw new Error('Erreur lors de la mise à jour de la position');
+              const errorData = await response.json();
+              throw new Error(errorData.message || 'Erreur lors de la mise à jour de la position');
             }
+
           } catch (error) {
             console.error('Erreur de partage de position:', error);
-            setError('Erreur lors de la mise à jour de la position');
-            setIsSharing(false);
+            setError('Erreur de connexion au serveur. Vos positions sont sauvegardées localement.');
           }
         },
         (error) => {
+          let errorMessage;
+          switch (error.code) {
+            case error.PERMISSION_DENIED:
+              errorMessage = 'Accès à la localisation refusé. Veuillez l\'autoriser dans vos paramètres.';
+              break;
+            case error.POSITION_UNAVAILABLE:
+              errorMessage = 'Position indisponible. Vérifiez votre GPS.';
+              break;
+            case error.TIMEOUT:
+              errorMessage = 'Délai d\'attente dépassé. Vérifiez votre connexion.';
+              break;
+            default:
+              errorMessage = 'Erreur de géolocalisation inconnue.';
+          }
           console.error('Erreur de géolocalisation:', error);
-          setError('Impossible d\'accéder à votre position. Vérifiez vos paramètres de localisation.');
+          setError(errorMessage);
           setIsSharing(false);
         },
         {
@@ -55,7 +76,6 @@ export default function ShareLocation() {
         }
       );
 
-      // Nettoyer le watch quand le composant est démonté
       return () => {
         navigator.geolocation.clearWatch(watchId);
         setIsSharing(false);
@@ -83,17 +103,32 @@ export default function ShareLocation() {
               <span className="font-medium">Position en cours de partage</span>
             </div>
             <div className="mt-4 text-sm text-green-600 text-center">
+              {lastPosition && (
+                <p className="mb-2">
+                  Dernière position : 
+                  <br />
+                  {lastPosition.latitude.toFixed(6)}°N, {lastPosition.longitude.toFixed(6)}°E
+                  <br />
+                  Précision : ±{Math.round(lastPosition.accuracy)}m
+                </p>
+              )}
               <p>Votre position est transmise au PC</p>
               <p className="mt-2 font-medium">
                 Gardez cette page ouverte pour continuer le partage
               </p>
             </div>
+            {error && (
+              <div className="mt-4 p-2 bg-yellow-50 border border-yellow-200 rounded text-yellow-700 text-sm">
+                {error}
+              </div>
+            )}
           </div>
         ) : (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4">
             <div className="flex items-center gap-2 text-red-700 justify-center">
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
               <span className="font-medium">Erreur de partage</span>
             </div>

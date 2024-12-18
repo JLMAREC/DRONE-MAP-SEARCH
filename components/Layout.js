@@ -1,22 +1,35 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 export default function Layout({ children, victimLocation, zones, searchRadius }) {
+  const [baseUrl, setBaseUrl] = useState('');
+
+  useEffect(() => {
+    setBaseUrl(window.location.origin);
+  }, []);
   const handleShare = async () => {
     const phoneNumber = prompt("Entrez le numéro de téléphone du destinataire (ex: 0612345678):");
     if (!phoneNumber) return;
 
     const formattedNumber = phoneNumber.replace(/^0/, '33').replace(/\D/g, '');
     
-    // Création des URLs avec les paramètres
-    const baseUrl = window.location.origin;
-    const mapData = encodeURIComponent(JSON.stringify({
+    // Préparation des données pour l'URL
+    const mapData = {
       victim: victimLocation,
       searchRadius: searchRadius,
-      zones: zones
-    }));
+      zones: zones ? zones.map(zone => ({
+        id: zone.id,
+        name: zone.name,
+        coordinates: zone.coordinates,
+        area: zone.area,
+        color: zone.color,
+        completed: zone.completed
+      })) : []
+    };
     
-    const mapUrl = `${baseUrl}/map-view?data=${mapData}`;
-    const shareUrl = `${baseUrl}/share/team-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    // Encodage sécurisé des données
+    const encodedData = btoa(encodeURIComponent(JSON.stringify(mapData)));
+    const mapUrl = `${baseUrl}/map-view/${encodedData}`;
+    const shareUrl = `${baseUrl}/share/${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
     // Obtenir l'adresse depuis les coordonnées
     const getAddress = async (lat, lon) => {
@@ -54,7 +67,6 @@ _SDIS 56 - Cellule Appui Drone_`;
 
     window.open(`https://api.whatsapp.com/send?phone=${formattedNumber}&text=${encodeURIComponent(message)}`, '_blank');
   };
-
   return (
     <div className="flex flex-col h-screen">
       <header className="bg-[#1a2742] text-white py-4 px-8">
@@ -63,7 +75,9 @@ _SDIS 56 - Cellule Appui Drone_`;
             <img src="/logo_sdis.png" alt="Logo SDIS" className="h-28" />
             <div className="space-y-1">
               <h1 className="text-3xl font-bold">Cellule Appui Drone</h1>
-              <p className="text-base opacity-90">Service Départemental d'Incendie et de Secours du Morbihan</p>
+              <p className="text-base opacity-90">
+                Service Départemental d'Incendie et de Secours du Morbihan
+              </p>
             </div>
           </div>
           
@@ -85,110 +99,180 @@ _SDIS 56 - Cellule Appui Drone_`;
     </div>
   );
 }
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/router';
+import { useState, useEffect } from 'react';
+import { AlertTriangle, MapPin } from 'lucide-react';
 
-export default function ShareLocation() {
-  const router = useRouter();
-  const { teamId } = router.query;
-  const [isSharing, setIsSharing] = useState(false);
+export default function Layout({ 
+  children, 
+  victimLocation, 
+  zones = [], 
+  searchRadius,
+  onError,
+  minimal = false
+}) {
+  const [baseUrl, setBaseUrl] = useState('');
+  const [sharing, setSharing] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (!teamId) return;
+    setBaseUrl(window.location.origin);
+  }, []);
 
-    if ("geolocation" in navigator) {
-      setIsSharing(true);
+  const validatePhoneNumber = (number) => {
+    const regex = /^(?:(?:\+|00)33|0)\s*[1-9](?:[\s.-]*\d{2}){4}$/;
+    return regex.test(number);
+  };
+
+  const getAddress = async (lat, lon) => {
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`,
+        { headers: { 'Accept-Language': 'fr' } }
+      );
+      if (!response.ok) throw new Error('Erreur de géocodage');
+      const data = await response.json();
+      return data.display_name;
+    } catch (error) {
+      console.error('Erreur de géocodage:', error);
+      return `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+    }
+  };
+
+  const handleShare = async () => {
+    try {
+      setSharing(true);
+      setError(null);
+
+      if (!victimLocation) {
+        throw new Error("Veuillez définir la position de la victime avant de partager");
+      }
+
+      const phoneNumber = prompt("Entrez le numéro de téléphone du destinataire (ex: 0612345678):");
+      if (!phoneNumber) {
+        setSharing(false);
+        return;
+      }
+
+      if (!validatePhoneNumber(phoneNumber)) {
+        throw new Error("Numéro de téléphone invalide");
+      }
+
+      const formattedNumber = phoneNumber.replace(/^0/, '33').replace(/\D/g, '');
       
-      const watchId = navigator.geolocation.watchPosition(
-        async (position) => {
-          try {
-            const { latitude, longitude } = position.coords;
-            // Stocker la position dans localStorage pour le développement local
-            localStorage.setItem('team_position', JSON.stringify({
-              teamId,
-              latitude,
-              longitude,
-              timestamp: new Date().toISOString()
-            }));
+      // Préparation des données pour l'URL avec validation
+      const mapData = {
+        victim: victimLocation,
+        searchRadius: searchRadius || 0,
+        zones: zones.map(zone => ({
+          id: zone.id,
+          name: zone.name,
+          coordinates: zone.coordinates,
+          area: zone.area,
+          color: zone.color,
+          completed: zone.completed
+        }))
+      };
 
-            // Envoyer la position au PC
-            const response = await fetch('/api/update-position', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                teamId,
-                latitude,
-                longitude,
-                timestamp: new Date().toISOString()
-              })
-            });
+      // Double encodage pour éviter les problèmes de caractères spéciaux
+      const encodedData = btoa(encodeURIComponent(JSON.stringify(mapData)));
+      const mapUrl = `${baseUrl}/map-view/${encodedData}`;
+      const shareUrl = `${baseUrl}/share/${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-            if (!response.ok) {
-              throw new Error('Erreur lors de la mise à jour de la position');
-            }
-          } catch (error) {
-            console.error('Erreur:', error);
-            setError('Erreur de mise à jour de la position');
-          }
-        },
-        (error) => {
-          console.error('Erreur de géolocalisation:', error);
-          setIsSharing(false);
-          setError('Erreur de géolocalisation');
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 5000,
-          maximumAge: 0
-        }
+      const address = await getAddress(victimLocation[0], victimLocation[1]);
+
+      const zonesList = zones
+        .filter(zone => !zone.completed)
+        .map(zone => ` - ${zone.name}: ${zone.area} ha`)
+        .join('\n');
+
+      const message = `🚨 *RECHERCHE DE VICTIME - SDIS 56*
+
+📍 *DERNIÈRE POSITION*
+${address}
+Coordonnées GPS : ${victimLocation[0].toFixed(6)}, ${victimLocation[1].toFixed(6)}
+
+⭕ *ZONES DE RECHERCHE*
+ - Zone prioritaire : 500m
+ - Zone élargie : ${(searchRadius/1000).toFixed(2)}km
+${zones.length > 0 ? `\n*ZONES EN COURS*\n${zonesList}` : ''}
+
+🔗 *LIENS UTILES*
+
+📱 Carte en direct :
+${mapUrl}
+
+📍 Partager votre position :
+${shareUrl}
+
+_SDIS 56 - Cellule Appui Drone_`;
+
+      window.open(
+        `https://api.whatsapp.com/send?phone=${formattedNumber}&text=${encodeURIComponent(message)}`,
+        '_blank'
       );
 
-      return () => {
-        navigator.geolocation.clearWatch(watchId);
-        setIsSharing(false);
-      };
-    } else {
-      setError('Géolocalisation non supportée');
+    } catch (err) {
+      setError(err.message);
+      onError?.(err.message);
+    } finally {
+      setSharing(false);
     }
-  }, [teamId]);
+  };
+
+  if (minimal) {
+    return <main className="flex-1 flex overflow-hidden">{children}</main>;
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6">
-        <div className="text-center mb-6">
-          <h1 className="text-2xl font-bold text-[#1a2742]">
-            SDIS 56 - Cellule Appui Drone
-          </h1>
-          <p className="text-gray-600 mt-2">Partage de Position</p>
-        </div>
-
-        {isSharing ? (
-          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-            <div className="flex items-center gap-2 justify-center text-green-700">
-              <div className="h-3 w-3 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="font-medium">Position en cours de partage</span>
+    <div className="flex flex-col h-screen">
+      <header className="bg-[#1a2742] text-white py-4 px-8">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-8">
+            <img src="/logo_sdis.png" alt="Logo SDIS" className="h-28" />
+            <div className="space-y-1">
+              <h1 className="text-3xl font-bold">Cellule Appui Drone</h1>
+              <p className="text-base opacity-90">
+                Service Départemental d'Incendie et de Secours du Morbihan
+              </p>
             </div>
-            <p className="mt-4 text-sm text-green-600 text-center">
-              Gardez cette page ouverte pour continuer le partage
-            </p>
           </div>
-        ) : (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-            <p className="text-red-700 text-center">
-              {error || "Une erreur est survenue"}
-            </p>
+          
+          <div className="flex flex-col gap-2">
+            {error && (
+              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-2 rounded flex items-center gap-2">
+                <AlertTriangle size={20} />
+                <span>{error}</span>
+              </div>
+            )}
+            
             <button
-              onClick={() => window.location.reload()}
-              className="mt-4 w-full bg-red-600 text-white py-2 rounded-lg hover:bg-red-700"
+              onClick={handleShare}
+              disabled={sharing || !victimLocation}
+              className={`flex items-center justify-center gap-2 ${
+                !victimLocation 
+                  ? 'bg-gray-400 cursor-not-allowed' 
+                  : 'bg-green-500 hover:bg-green-600'
+              } text-white px-4 py-2 rounded-lg transition-colors`}
             >
-              Réessayer
+              {sharing ? (
+                <div className="flex items-center gap-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                  <span>Partage en cours...</span>
+                </div>
+              ) : (
+                <>
+                  <MapPin className="w-5 h-5" />
+                  <span>Partager via WhatsApp</span>
+                </>
+              )}
             </button>
           </div>
-        )}
-      </div>
+        </div>
+      </header>
+      
+      <main className="flex-1 flex overflow-hidden">
+        {children}
+      </main>
     </div>
   );
 }

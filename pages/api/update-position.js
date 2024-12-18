@@ -1,10 +1,26 @@
 // pages/api/update-position.js
 
-// Stockage temporaire des positions (dans un vrai déploiement, utilisez une base de données)
-let positions = new Map();
+// Stockage temporaire des positions avec une durée de vie
+const positions = new Map();
+const POSITION_LIFETIME = 5 * 60 * 1000; // 5 minutes en millisecondes
+
+// Nettoyer les positions expirées
+const cleanExpiredPositions = () => {
+  const now = Date.now();
+  for (const [teamId, data] of positions.entries()) {
+    if (now - new Date(data.lastUpdate).getTime() > POSITION_LIFETIME) {
+      positions.delete(teamId);
+    }
+  }
+};
+
+// Validation des coordonnées
+const isValidCoordinate = (coord) => {
+  return typeof coord === 'number' && !isNaN(coord);
+};
 
 export default async function handler(req, res) {
-  // Vérifier que c'est une requête POST
+  // Vérification de la méthode HTTP
   if (req.method !== 'POST') {
     return res.status(405).json({ 
       success: false, 
@@ -13,42 +29,54 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Récupérer les données de position
-    const { teamId, latitude, longitude, timestamp } = JSON.parse(req.body);
+    // Nettoyage périodique des positions expirées
+    cleanExpiredPositions();
 
-    // Vérifier que toutes les données nécessaires sont présentes
-    if (!teamId || !latitude || !longitude) {
+    // Parsing et validation des données
+    const { teamId, latitude, longitude, accuracy, timestamp } = JSON.parse(req.body);
+
+    // Validation des données reçues
+    if (!teamId) {
       return res.status(400).json({
         success: false,
-        message: 'Données manquantes : teamId, latitude et longitude sont requis'
+        message: 'ID d\'équipe manquant'
       });
     }
 
-    // Stocker la position
-    positions.set(teamId, {
-      latitude,
-      longitude,
+    if (!isValidCoordinate(latitude) || !isValidCoordinate(longitude)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Coordonnées invalides'
+      });
+    }
+
+    // Formatage des données de position
+    const positionData = {
+      teamId,
+      latitude: parseFloat(latitude),
+      longitude: parseFloat(longitude),
+      accuracy: accuracy ? parseFloat(accuracy) : null,
       timestamp: timestamp || new Date().toISOString(),
       lastUpdate: new Date().toISOString()
-    });
+    };
 
-    // Log pour debug
-    console.log(`Position mise à jour pour l'équipe ${teamId}:`, {
-      latitude,
-      longitude,
-      timestamp
-    });
+    // Mise à jour de la position
+    positions.set(teamId, positionData);
 
-    // Renvoyer un succès
+    // Log de debug en développement
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`Position mise à jour pour l'équipe ${teamId}:`, {
+        latitude: positionData.latitude,
+        longitude: positionData.longitude,
+        accuracy: positionData.accuracy,
+        timestamp: positionData.timestamp
+      });
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Position mise à jour avec succès',
-      data: {
-        teamId,
-        latitude,
-        longitude,
-        timestamp
-      }
+      data: positionData
     });
 
   } catch (error) {
@@ -57,20 +85,35 @@ export default async function handler(req, res) {
     return res.status(500).json({
       success: false,
       message: 'Erreur serveur lors de la mise à jour de la position',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Erreur interne'
     });
   }
 }
 
-// API pour récupérer la position d'une équipe
+// Fonction pour récupérer la position d'une équipe
 export async function getTeamPosition(teamId) {
-  return positions.get(teamId);
+  cleanExpiredPositions();
+  const position = positions.get(teamId);
+  
+  if (!position) return null;
+  
+  // Vérifier si la position n'est pas expirée
+  if (Date.now() - new Date(position.lastUpdate).getTime() > POSITION_LIFETIME) {
+    positions.delete(teamId);
+    return null;
+  }
+  
+  return position;
 }
 
-// API pour récupérer toutes les positions
+// Fonction pour récupérer toutes les positions actives
 export async function getAllPositions() {
-  return Array.from(positions.entries()).map(([teamId, data]) => ({
-    teamId,
-    ...data
-  }));
+  cleanExpiredPositions();
+  return Array.from(positions.entries())
+    .map(([teamId, data]) => ({
+      teamId,
+      ...data,
+      age: Date.now() - new Date(data.lastUpdate).getTime()
+    }))
+    .filter(position => position.age <= POSITION_LIFETIME);
 }

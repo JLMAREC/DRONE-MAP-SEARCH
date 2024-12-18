@@ -14,13 +14,18 @@ const Tooltip = dynamic(() => import('react-leaflet').then((mod) => mod.Tooltip)
 const Polygon = dynamic(() => import('react-leaflet').then((mod) => mod.Polygon), { ssr: false });
 const FeatureGroup = dynamic(() => import('react-leaflet').then((mod) => mod.FeatureGroup), { ssr: false });
 
-// Icône pour les équipes sur le terrain
-const teamIcon = new L.DivIcon({
-  html: `<div class="flex items-center justify-center w-8 h-8 bg-blue-600 rounded-full border-2 border-white shadow-lg">
-    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-    </svg>
-  </div>`,
+// Icône améliorée pour les équipes
+const createTeamIcon = (status = 'active') => new L.DivIcon({
+  html: `
+    <div class="flex items-center justify-center w-8 h-8 bg-blue-600 rounded-full border-2 border-white shadow-lg relative">
+      <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+      </svg>
+      <div class="absolute -bottom-1 -right-1 h-3 w-3 ${
+        status === 'active' ? 'bg-green-500' : 'bg-yellow-500'
+      } rounded-full border-2 border-white"></div>
+    </div>
+  `,
   className: 'team-icon',
   iconSize: [32, 32],
   iconAnchor: [16, 32]
@@ -30,12 +35,13 @@ function MapController({ center, zoom }) {
   const map = useMap();
   useEffect(() => {
     if (center) {
-      map.setView(center, 16);
+      map.setView(center, zoom || 16);
     }
-  }, [center, map]);
+  }, [center, map, zoom]);
   return null;
 }
-const Legend = ({ zones }) => {
+
+const Legend = ({ zones, teamPositions }) => {
   const calculateTotalArea = (zones) => {
     if (!zones || zones.length === 0) return "0.00";
     return zones.reduce((total, zone) => total + parseFloat(zone.area), 0).toFixed(2);
@@ -59,6 +65,17 @@ const Legend = ({ zones }) => {
           Surface totale : {calculateTotalArea(zones)} ha
         </div>
       </div>
+      {teamPositions.size > 0 && (
+        <div className="mt-3 pt-3 border-t border-gray-200">
+          <h4 className="text-[#1a2742] font-bold mb-2">Équipes actives</h4>
+          {Array.from(teamPositions.values()).map((team) => (
+            <div key={team.teamId} className="flex items-center gap-2 text-sm">
+              <div className="h-2 w-2 bg-green-500 rounded-full"></div>
+              <span>Équipe {team.teamId.split('-')[0]}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -70,7 +87,6 @@ const MapControllerWrapper = ({ center, zoom }) => {
   );
   return <MapControllerWithNoSSR center={center} zoom={zoom} />;
 };
-
 export default function ClientSideMap({ 
   center, 
   zoom,
@@ -86,9 +102,10 @@ export default function ClientSideMap({
   const [map, setMap] = useState(null);
   const [L, setL] = useState(null);
   const [teamPositions, setTeamPositions] = useState(new Map());
+  const [isLoadingPositions, setIsLoadingPositions] = useState(false);
   const defaultCenter = [47.6578, -2.7604];
 
-  // Initialisation de Leaflet et mise en place des effets
+  // Initialisation de Leaflet
   useEffect(() => {
     const initLeaflet = async () => {
       const L = await import('leaflet');
@@ -107,38 +124,51 @@ export default function ClientSideMap({
 
     initLeaflet();
   }, []);
+
   // Mise à jour des positions des équipes
   useEffect(() => {
     const checkTeamPositions = async () => {
       try {
+        setIsLoadingPositions(true);
+        
+        // Vérifier d'abord le stockage local
         const storedPositions = localStorage.getItem('team_position');
         if (storedPositions) {
           const position = JSON.parse(storedPositions);
-          setTeamPositions(new Map([[position.teamId, position]]));
+          const timestamp = new Date(position.timestamp);
+          if (Date.now() - timestamp < 5 * 60 * 1000) { // 5 minutes
+            setTeamPositions(new Map([[position.teamId, position]]));
+          }
         }
 
-        if (process.env.NODE_ENV === 'production') {
-          const response = await fetch('/api/get-positions');
-          if (response.ok) {
-            const data = await response.json();
-            if (data.success) {
-              const positionsMap = new Map();
-              data.data.forEach(pos => {
-                positionsMap.set(pos.teamId, pos);
+        // Récupérer les positions du serveur
+        const response = await fetch('/api/get-positions');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success) {
+            const positionsMap = new Map();
+            data.data.forEach(pos => {
+              positionsMap.set(pos.teamId, {
+                ...pos,
+                status: Date.now() - new Date(pos.timestamp) < 30000 ? 'active' : 'inactive'
               });
-              setTeamPositions(positionsMap);
-            }
+            });
+            setTeamPositions(positionsMap);
           }
         }
       } catch (error) {
         console.error('Erreur lors de la récupération des positions:', error);
+      } finally {
+        setIsLoadingPositions(false);
       }
     };
 
+    checkTeamPositions();
     const interval = setInterval(checkTeamPositions, 5000);
     return () => clearInterval(interval);
   }, []);
 
+  // Styles CSS globaux
   useEffect(() => {
     if (typeof document !== 'undefined') {
       const style = document.createElement('style');
@@ -171,17 +201,17 @@ export default function ClientSideMap({
   }
 
   const getZoneStyle = (zone) => ({
-    color: zone.color,
+    color: zone.color || zoneColor,
     weight: 2,
     opacity: 1,
     fillOpacity: 0.1,
-    fillColor: zone.color,
+    fillColor: zone.color || zoneColor,
     dashArray: zone.completed ? '10, 10' : null
   });
 
   const formatDistance = (distance) => {
     if (!distance) return '';
-    return `${distance.toFixed(2)} km`;
+    return `${(distance / 1000).toFixed(2)} km`;
   };
 
   return (
@@ -201,10 +231,7 @@ export default function ClientSideMap({
         {!viewOnly && <DrawControl onZoneCreated={onZoneCreated} />}
         
         {center && (
-          <Marker 
-            position={center} 
-            icon={positionIcon}
-          >
+          <Marker position={center} icon={positionIcon}>
             <Tooltip>Ma position</Tooltip>
           </Marker>
         )}
@@ -216,12 +243,14 @@ export default function ClientSideMap({
           <Marker
             key={team.teamId}
             position={[team.latitude, team.longitude]}
-            icon={teamIcon}
+            icon={createTeamIcon(team.status)}
           >
-            <Tooltip>
+            <Tooltip permanent={team.status === 'inactive'}>
               <div>
                 <strong>{`Équipe ${team.teamId.split('-')[0]}`}</strong>
                 <div className="text-sm">
+                  Précision: ±{Math.round(team.accuracy || 0)}m
+                  <br />
                   Dernière mise à jour: {new Date(team.timestamp).toLocaleTimeString()}
                 </div>
               </div>
@@ -243,12 +272,13 @@ export default function ClientSideMap({
                 <div className="font-semibold text-red-600">Dernière position connue</div>
                 {center && (
                   <div className="text-sm mt-1">
-                    Distance: {formatDistance(L.latLng(center).distanceTo(L.latLng(victimLocation)) / 1000)}
+                    Distance: {formatDistance(L.latLng(center).distanceTo(L.latLng(victimLocation)))}
                   </div>
                 )}
               </Tooltip>
             </Marker>
 
+            {/* Zones de recherche */}
             <Circle 
               center={victimLocation} 
               radius={500}
@@ -313,7 +343,16 @@ export default function ClientSideMap({
         ))}
       </MapContainer>
       
-      <Legend zones={zones} />
+      {isLoadingPositions && (
+        <div className="absolute bottom-4 left-4 bg-white px-3 py-2 rounded-lg shadow-lg z-[1000]">
+          <div className="flex items-center gap-2">
+            <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent"></div>
+            <span className="text-sm text-gray-600">Mise à jour des positions...</span>
+          </div>
+        </div>
+      )}
+      
+      <Legend zones={zones} teamPositions={teamPositions} />
     </div>
   );
 }
