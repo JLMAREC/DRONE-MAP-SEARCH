@@ -1,9 +1,9 @@
 // pages/api/get-positions.js
 
-import { getAllPositions, getTeamPosition } from './update-position';
+import { getAllPositions } from './update-position';
 
 export default async function handler(req, res) {
-  // Vérifier que c'est une requête GET
+  // Vérification de la méthode HTTP
   if (req.method !== 'GET') {
     return res.status(405).json({ 
       success: false, 
@@ -12,32 +12,27 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Récupérer toutes les positions actives avec délai d'expiration de 5 minutes
+    // Récupération de toutes les positions actives
     const positions = await getAllPositions();
-    const now = Date.now();
-    const fiveMinutes = 5 * 60 * 1000; // 5 minutes en millisecondes
-
-    // Formater et filtrer les positions
+    
+    // Formatage et filtrage des positions
     const formattedPositions = positions
       .filter(position => {
-        const age = now - new Date(position.lastUpdate || position.timestamp).getTime();
-        return age < fiveMinutes;
+        const age = Date.now() - new Date(position.timestamp).getTime();
+        return age < 5 * 60 * 1000; // Filtrer les positions de plus de 5 minutes
       })
-      .map(position => {
-        const age = now - new Date(position.lastUpdate || position.timestamp).getTime();
-        return {
-          teamId: position.teamId,
-          latitude: parseFloat(position.latitude),
-          longitude: parseFloat(position.longitude),
-          accuracy: position.accuracy ? parseFloat(position.accuracy) : null,
-          timestamp: position.timestamp,
-          lastUpdate: position.lastUpdate || position.timestamp,
-          age: Math.floor(age / 1000), // âge en secondes
-          status: age < 30000 ? 'active' : 'inactive' // inactif après 30 secondes sans mise à jour
-        };
-      });
+      .map(position => ({
+        teamId: position.teamId,
+        latitude: parseFloat(position.latitude),
+        longitude: parseFloat(position.longitude),
+        accuracy: position.accuracy ? parseFloat(position.accuracy) : null,
+        timestamp: position.timestamp,
+        lastUpdate: position.lastUpdate,
+        age: Math.floor((Date.now() - new Date(position.lastUpdate).getTime()) / 1000), // âge en secondes
+        status: (Date.now() - new Date(position.timestamp).getTime()) < 30000 ? 'active' : 'inactive'
+      }));
 
-    // Logs en développement uniquement
+    // Logs en développement
     if (process.env.NODE_ENV === 'development') {
       console.log(`Positions actives récupérées (${formattedPositions.length}):`, 
         formattedPositions.map(p => ({
@@ -48,14 +43,18 @@ export default async function handler(req, res) {
       );
     }
 
+    // Ajout de métadonnées utiles
+    const metadata = {
+      timestamp: new Date().toISOString(),
+      count: formattedPositions.length,
+      activeCount: formattedPositions.filter(p => p.status === 'active').length
+    };
+
     return res.status(200).json({
       success: true,
       message: `${formattedPositions.length} position(s) active(s) trouvée(s)`,
       data: formattedPositions,
-      metadata: {
-        timestamp: new Date().toISOString(),
-        count: formattedPositions.length
-      }
+      metadata
     });
 
   } catch (error) {
@@ -69,7 +68,7 @@ export default async function handler(req, res) {
   }
 }
 
-// Endpoint pour récupérer une position spécifique
+// Endpoint spécifique pour une équipe
 export async function getTeamPositionEndpoint(req, res) {
   const { teamId } = req.query;
 
@@ -82,7 +81,6 @@ export async function getTeamPositionEndpoint(req, res) {
 
   try {
     const position = await getTeamPosition(teamId);
-    const now = Date.now();
 
     if (!position) {
       return res.status(404).json({
@@ -91,8 +89,8 @@ export async function getTeamPositionEndpoint(req, res) {
       });
     }
 
-    // Vérifier si la position n'est pas expirée (5 minutes)
-    const age = now - new Date(position.lastUpdate || position.timestamp).getTime();
+    // Vérifier si la position n'est pas expirée
+    const age = Date.now() - new Date(position.timestamp).getTime();
     if (age > 5 * 60 * 1000) {
       return res.status(404).json({
         success: false,

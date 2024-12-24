@@ -1,3 +1,4 @@
+// pages/share/[teamId].js
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 
@@ -7,83 +8,116 @@ export default function ShareLocation() {
   const [isSharing, setIsSharing] = useState(false);
   const [error, setError] = useState(null);
   const [lastPosition, setLastPosition] = useState(null);
+  const [sessionDuration, setSessionDuration] = useState(0);
+
+  // Effet pour le timer de la session
+  useEffect(() => {
+    if (!isSharing) return;
+    const interval = setInterval(() => {
+      setSessionDuration(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isSharing]);
+
+  const formatDuration = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handlePositionSuccess = async (position) => {
+    try {
+      const locationData = {
+        teamId,
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+        timestamp: new Date().toISOString()
+      };
+
+      setLastPosition(locationData);
+      localStorage.setItem('team_position', JSON.stringify(locationData));
+
+      const response = await fetch('/api/update-position', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(locationData)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Erreur serveur');
+      }
+
+      console.log('Position mise à jour avec succès:', locationData);
+      setError(null);
+
+    } catch (err) {
+      console.error('Erreur mise à jour position:', err);
+      setError('Erreur réseau - Position sauvegardée localement');
+    }
+  };
+
+  const handlePositionError = (err) => {
+    console.error('Erreur GPS:', err);
+    let errorMessage = 'Erreur de géolocalisation';
+    
+    switch (err.code) {
+      case err.PERMISSION_DENIED:
+        errorMessage = 'Accès à la localisation refusé';
+        break;
+      case err.POSITION_UNAVAILABLE:
+        errorMessage = 'Position indisponible';
+        break;
+      case err.TIMEOUT:
+        errorMessage = 'Délai d\'attente dépassé';
+        break;
+    }
+    
+    setError(errorMessage);
+    setIsSharing(false);
+  };
 
   useEffect(() => {
     if (!teamId) return;
 
-    if ("geolocation" in navigator) {
-      setIsSharing(true);
-      setError(null);
-
-      const watchId = navigator.geolocation.watchPosition(
-        async (position) => {
-          const locationData = {
-            teamId,
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            accuracy: position.coords.accuracy,
-            timestamp: new Date().toISOString()
-          };
-
-          setLastPosition(locationData);
-
-          try {
-            // Stocker en local pour le développement et comme backup
-            localStorage.setItem('team_position', JSON.stringify(locationData));
-
-            // Envoyer au serveur
-            const response = await fetch('/api/update-position', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify(locationData)
-            });
-
-            if (!response.ok) {
-              const errorData = await response.json();
-              throw new Error(errorData.message || 'Erreur lors de la mise à jour de la position');
-            }
-
-          } catch (error) {
-            console.error('Erreur de partage de position:', error);
-            setError('Erreur de connexion au serveur. Vos positions sont sauvegardées localement.');
-          }
-        },
-        (error) => {
-          let errorMessage;
-          switch (error.code) {
-            case error.PERMISSION_DENIED:
-              errorMessage = 'Accès à la localisation refusé. Veuillez l\'autoriser dans vos paramètres.';
-              break;
-            case error.POSITION_UNAVAILABLE:
-              errorMessage = 'Position indisponible. Vérifiez votre GPS.';
-              break;
-            case error.TIMEOUT:
-              errorMessage = 'Délai d\'attente dépassé. Vérifiez votre connexion.';
-              break;
-            default:
-              errorMessage = 'Erreur de géolocalisation inconnue.';
-          }
-          console.error('Erreur de géolocalisation:', error);
-          setError(errorMessage);
-          setIsSharing(false);
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 5000,
-          maximumAge: 0
+    const startGeolocation = async () => {
+      try {
+        if (!navigator.geolocation) {
+          throw new Error('Géolocalisation non supportée');
         }
-      );
 
-      return () => {
-        navigator.geolocation.clearWatch(watchId);
+        const permission = await navigator.permissions.query({ name: 'geolocation' });
+        
+        if (permission.state === 'denied') {
+          throw new Error('Permission de géolocalisation refusée');
+        }
+
+        setIsSharing(true);
+        setError(null);
+
+        const watchId = navigator.geolocation.watchPosition(
+          handlePositionSuccess,
+          handlePositionError,
+          {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0
+          }
+        );
+
+        return () => {
+          navigator.geolocation.clearWatch(watchId);
+          setIsSharing(false);
+        };
+      } catch (err) {
+        console.error('Erreur initialisation:', err);
+        setError(err.message);
         setIsSharing(false);
-      };
-    } else {
-      setError('La géolocalisation n\'est pas supportée par votre appareil');
-      setIsSharing(false);
-    }
+      }
+    };
+
+    startGeolocation();
   }, [teamId]);
 
   return (
@@ -99,20 +133,24 @@ export default function ShareLocation() {
         {isSharing ? (
           <div className="bg-green-50 border border-green-200 rounded-lg p-4">
             <div className="flex items-center gap-2 text-green-700 justify-center">
-              <div className="h-3 w-3 bg-green-500 rounded-full animate-pulse"></div>
+              <div className="h-3 w-3 bg-green-500 rounded-full animate-ping"></div>
               <span className="font-medium">Position en cours de partage</span>
             </div>
             <div className="mt-4 text-sm text-green-600 text-center">
               {lastPosition && (
-                <p className="mb-2">
-                  Dernière position : 
-                  <br />
-                  {lastPosition.latitude.toFixed(6)}°N, {lastPosition.longitude.toFixed(6)}°E
-                  <br />
-                  Précision : ±{Math.round(lastPosition.accuracy)}m
-                </p>
+                <>
+                  <p className="mb-2">
+                    Dernière position :
+                    <br />
+                    {lastPosition.latitude.toFixed(6)}°N, {lastPosition.longitude.toFixed(6)}°E
+                    <br />
+                    Précision : ±{Math.round(lastPosition.accuracy)}m
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    Durée de la session : {formatDuration(sessionDuration)}
+                  </p>
+                </>
               )}
-              <p>Votre position est transmise au PC</p>
               <p className="mt-2 font-medium">
                 Gardez cette page ouverte pour continuer le partage
               </p>

@@ -1,22 +1,24 @@
 // pages/api/update-position.js
 
-// Stockage temporaire des positions avec une durée de vie
+// Stockage temporaire des positions
 const positions = new Map();
 const POSITION_LIFETIME = 5 * 60 * 1000; // 5 minutes en millisecondes
 
-// Nettoyer les positions expirées
+// Validation des coordonnées
+const isValidCoordinate = (coord) => {
+  return typeof coord === 'number' && !isNaN(coord) && isFinite(coord);
+};
+
+// Nettoyage des positions expirées
 const cleanExpiredPositions = () => {
   const now = Date.now();
   for (const [teamId, data] of positions.entries()) {
-    if (now - new Date(data.lastUpdate).getTime() > POSITION_LIFETIME) {
+    const positionAge = now - new Date(data.timestamp).getTime();
+    if (positionAge > POSITION_LIFETIME) {
+      console.log(`Position expirée supprimée pour l'équipe ${teamId}`);
       positions.delete(teamId);
     }
   }
-};
-
-// Validation des coordonnées
-const isValidCoordinate = (coord) => {
-  return typeof coord === 'number' && !isNaN(coord);
 };
 
 export default async function handler(req, res) {
@@ -29,28 +31,30 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Nettoyage périodique des positions expirées
+    // Nettoyage périodique
     cleanExpiredPositions();
 
-    // Parsing et validation des données
-    const { teamId, latitude, longitude, accuracy, timestamp } = JSON.parse(req.body);
+    // Parsing du body si nécessaire
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    const { teamId, latitude, longitude, accuracy, timestamp } = body;
 
-    // Validation des données reçues
+    // Validation des données
     if (!teamId) {
       return res.status(400).json({
         success: false,
-        message: 'ID d\'équipe manquant'
+        message: 'Identifiant d\'équipe manquant'
       });
     }
 
     if (!isValidCoordinate(latitude) || !isValidCoordinate(longitude)) {
       return res.status(400).json({
         success: false,
-        message: 'Coordonnées invalides'
+        message: 'Coordonnées invalides',
+        details: { latitude, longitude }
       });
     }
 
-    // Formatage des données de position
+    // Création de l'objet position
     const positionData = {
       teamId,
       latitude: parseFloat(latitude),
@@ -60,10 +64,10 @@ export default async function handler(req, res) {
       lastUpdate: new Date().toISOString()
     };
 
-    // Mise à jour de la position
+    // Stockage de la position
     positions.set(teamId, positionData);
 
-    // Log de debug en développement
+    // Log en développement
     if (process.env.NODE_ENV === 'development') {
       console.log(`Position mise à jour pour l'équipe ${teamId}:`, {
         latitude: positionData.latitude,
@@ -76,12 +80,14 @@ export default async function handler(req, res) {
     return res.status(200).json({
       success: true,
       message: 'Position mise à jour avec succès',
-      data: positionData
+      data: {
+        ...positionData,
+        activeTeams: positions.size
+      }
     });
 
   } catch (error) {
     console.error('Erreur lors de la mise à jour de la position:', error);
-    
     return res.status(500).json({
       success: false,
       message: 'Erreur serveur lors de la mise à jour de la position',
@@ -93,27 +99,17 @@ export default async function handler(req, res) {
 // Fonction pour récupérer la position d'une équipe
 export async function getTeamPosition(teamId) {
   cleanExpiredPositions();
-  const position = positions.get(teamId);
-  
-  if (!position) return null;
-  
-  // Vérifier si la position n'est pas expirée
-  if (Date.now() - new Date(position.lastUpdate).getTime() > POSITION_LIFETIME) {
-    positions.delete(teamId);
-    return null;
-  }
-  
-  return position;
+  return positions.get(teamId);
 }
 
 // Fonction pour récupérer toutes les positions actives
 export async function getAllPositions() {
   cleanExpiredPositions();
-  return Array.from(positions.entries())
-    .map(([teamId, data]) => ({
-      teamId,
-      ...data,
-      age: Date.now() - new Date(data.lastUpdate).getTime()
+  const now = Date.now();
+  return Array.from(positions.values())
+    .map(position => ({
+      ...position,
+      age: now - new Date(position.timestamp).getTime()
     }))
-    .filter(position => position.age <= POSITION_LIFETIME);
+    .sort((a, b) => a.age - b.age);
 }

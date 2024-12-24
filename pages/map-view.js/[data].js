@@ -1,8 +1,9 @@
+// pages/map-view/[data].js
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
 
-const MapWithNoSSR = dynamic(() => import('../components/ClientSideMap'), {
+const MapWithNoSSR = dynamic(() => import('../../components/ClientSideMap'), {
   ssr: false,
   loading: () => (
     <div className="w-full h-full flex items-center justify-center bg-gray-50">
@@ -13,23 +14,37 @@ const MapWithNoSSR = dynamic(() => import('../components/ClientSideMap'), {
 
 export default function MapView() {
   const router = useRouter();
+  const { data } = router.query;
   const [mapData, setMapData] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    // Récupérer les données depuis l'URL
-    const { data } = router.query;
     if (!data) return;
 
     try {
-      // Décodage des données
-      const decodedData = JSON.parse(decodeURIComponent(atob(data)));
-      setMapData(decodedData);
+      console.log('Données encodées reçues:', data);
+      
+      // Décodage en plusieurs étapes
+      const decodedFromBase64 = atob(data);
+      console.log('Après décodage base64:', decodedFromBase64);
+      
+      const decodedFromURI = decodeURIComponent(decodedFromBase64);
+      console.log('Après décodage URI:', decodedFromURI);
+      
+      const parsedData = JSON.parse(decodedFromURI);
+      console.log('Données finales parsées:', parsedData);
+
+      // Validation des données nécessaires
+      if (!parsedData.victim) {
+        throw new Error('Position de la victime manquante');
+      }
+
+      setMapData(parsedData);
     } catch (err) {
-      console.error('Erreur de décodage:', err);
-      setError('Impossible de charger les données de la carte');
+      console.error('Erreur lors du décodage des données:', err);
+      setError(`Impossible de charger les données de la carte: ${err.message}`);
     }
-  }, [router.query]);
+  }, [data]);
 
   if (error) {
     return (
@@ -37,6 +52,11 @@ export default function MapView() {
         <div className="text-center p-8">
           <h2 className="text-xl font-bold text-red-600 mb-2">Erreur</h2>
           <p className="text-gray-600">{error}</p>
+          <div className="mt-4 text-sm text-gray-500">
+            <pre className="bg-gray-100 p-4 rounded overflow-auto">
+              {JSON.stringify({ query: router.query }, null, 2)}
+            </pre>
+          </div>
         </div>
       </div>
     );
