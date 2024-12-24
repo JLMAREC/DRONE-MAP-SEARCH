@@ -1,3 +1,4 @@
+// Version 2.0 - Système de partage amélioré
 // Base de données temporaire (remplacer par une vraie DB en production)
 const operations = new Map();
 
