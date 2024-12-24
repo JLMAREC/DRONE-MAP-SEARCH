@@ -12,9 +12,11 @@ export default function Layout({
 }) {
   const [baseUrl, setBaseUrl] = useState('');
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isPhoneModalOpen, setIsPhoneModalOpen] = useState(false);
   const [shareData, setShareData] = useState(null);
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [phoneNumber, setPhoneNumber] = useState('');
 
   useEffect(() => {
     setBaseUrl(window.location.origin);
@@ -22,58 +24,51 @@ export default function Layout({
 
   const handleShare = async () => {
     try {
-      setIsLoading(true);
       setError(null);
 
       if (!victimLocation) {
         throw new Error("Veuillez définir une position de victime");
       }
 
-      console.log("Création de l'opération...");
-      console.log("Zones reçues:", zones);
+      setIsPhoneModalOpen(true);
       
-      // Créer un code d'opération unique
+    } catch (err) {
+      console.error('Erreur:', err);
+      setError(err.message);
+      onError?.(err.message);
+    }
+  };
+
+  const handlePhoneSubmit = async (e) => {
+    e.preventDefault();
+    setIsPhoneModalOpen(false);
+
+    if (!phoneNumber) return;
+
+    try {
+      setIsLoading(true);
+      const formattedNumber = phoneNumber.replace(/^0/, '33').replace(/\D/g, '');
+      
       const operationId = `OP-${new Date().getTime().toString(36).toUpperCase()}`;
-      console.log("ID opération créé:", operationId);
+      console.log("Création de l'opération:", operationId);
       
-      // Préparation des données avec validation et transformation des zones
       const operationData = {
         id: operationId,
-        victim: {
-          lat: victimLocation[0],
-          lng: victimLocation[1],
-          coordinates: victimLocation // garder aussi le format original
-        },
+        victim: victimLocation,
         searchRadius: searchRadius || 0,
         zones: zones.map(zone => ({
           id: zone.id || `zone-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           name: zone.name || 'Zone sans nom',
-          coordinates: Array.isArray(zone.coordinates) ? zone.coordinates : [],
-          area: zone.area || 0,
+          coordinates: zone.coordinates,
+          area: zone.area,
           color: zone.color || '#1a2742',
-          completed: Boolean(zone.completed),
-          type: zone.type || 'polygon',
-          timestamp: zone.timestamp || new Date().toISOString()
-        })).filter(zone => zone.coordinates.length > 0),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+          completed: zone.completed || false
+        })),
+        createdAt: new Date().toISOString()
       };
 
-      // Log détaillé pour debug
-      console.log("Données complètes de l'opération:", {
-        id: operationData.id,
-        victimPosition: operationData.victim,
-        searchRadius: operationData.searchRadius,
-        zonesCount: operationData.zones.length,
-        zonesDetails: operationData.zones.map(z => ({
-          id: z.id,
-          name: z.name,
-          pointCount: z.coordinates.length,
-          area: z.area
-        }))
-      });
+      console.log("Données de l'opération:", operationData);
 
-      // Sauvegarder les données
       const response = await fetch('/api/operation/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -91,6 +86,31 @@ export default function Layout({
 
       console.log("URLs générées:", { shareUrl, teamUrl });
 
+      const message = `🚨 *RECHERCHE DE VICTIME - SDIS 56*
+
+📍 *DERNIÈRE POSITION*
+Coordonnées GPS : ${victimLocation[0].toFixed(6)}, ${victimLocation[1].toFixed(6)}
+
+⭕ *ZONES DE RECHERCHE*
+ - Zone prioritaire : 500m
+ - Zone élargie : ${(searchRadius/1000).toFixed(2)}km
+${zones.length > 0 ? `\n*ZONES EN COURS*\n${zones.map(z => ` - ${z.name}: ${z.area} ha`).join('\n')}` : ''}
+
+🔗 *LIENS UTILES*
+
+📱 Carte en direct :
+${shareUrl}
+
+📍 Partager votre position :
+${teamUrl}
+
+_SDIS 56 - Cellule Appui Drone_`;
+
+      window.open(
+        `https://api.whatsapp.com/send?phone=${formattedNumber}&text=${encodeURIComponent(message)}`,
+        '_blank'
+      );
+
       setShareData({
         operationId,
         shareUrl,
@@ -101,9 +121,9 @@ export default function Layout({
     } catch (err) {
       console.error('Erreur complète:', err);
       setError(err.message);
-      onError?.(err.message);
     } finally {
       setIsLoading(false);
+      setPhoneNumber('');
     }
   };
 
@@ -135,7 +155,7 @@ export default function Layout({
             >
               {isLoading ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
                   <span>Création en cours...</span>
                 </>
               ) : (
@@ -154,6 +174,43 @@ export default function Layout({
       <main className="flex-1 flex overflow-hidden">
         {children}
       </main>
+
+      {isPhoneModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+            <h2 className="text-xl font-bold mb-4">Numéro de téléphone du destinataire</h2>
+            <form onSubmit={handlePhoneSubmit}>
+              <input
+                type="tel"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                placeholder="0612345678"
+                className="w-full px-4 py-2 border rounded-lg mb-4"
+                pattern="^(?:(?:\+|00)33|0)\s*[1-9](?:[\s.-]*\d{2}){4}$"
+                required
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPhoneModalOpen(false);
+                    setPhoneNumber('');
+                  }}
+                  className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600"
+                >
+                  Partager
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {isShareModalOpen && shareData && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
