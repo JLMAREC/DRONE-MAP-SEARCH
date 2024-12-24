@@ -96,7 +96,6 @@ export default function ClientSideMap({
   zoneColor = '#1a2742',
   victimLocation,
   onVictimLocationSet,
-  victimTimestamp,
   viewOnly = false
 }) {
   const [map, setMap] = useState(null);
@@ -131,31 +130,31 @@ export default function ClientSideMap({
       try {
         setIsLoadingPositions(true);
         
-        // Vérifier d'abord le stockage local
+        // Vérifier le stockage local
         const storedPositions = localStorage.getItem('team_position');
         if (storedPositions) {
           const position = JSON.parse(storedPositions);
           const timestamp = new Date(position.timestamp);
-          if (Date.now() - timestamp < 5 * 60 * 1000) { // 5 minutes
+          if (Date.now() - timestamp < 5 * 60 * 1000) {
             setTeamPositions(new Map([[position.teamId, position]]));
           }
         }
 
         // Récupérer les positions du serveur
-        const response = await fetch('/api/get-positions');
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success) {
-            const positionsMap = new Map();
-            data.data.forEach(pos => {
-              positionsMap.set(pos.teamId, {
-                ...pos,
-                status: Date.now() - new Date(pos.timestamp) < 30000 ? 'active' : 'inactive'
-              });
+        const response = await fetch('/api/team/position');
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+          const positionsMap = new Map();
+          data.data.forEach(pos => {
+            positionsMap.set(pos.teamId, {
+              ...pos,
+              status: Date.now() - new Date(pos.timestamp) < 30000 ? 'active' : 'inactive'
             });
-            setTeamPositions(positionsMap);
-          }
+          });
+          setTeamPositions(positionsMap);
         }
+
       } catch (error) {
         console.error('Erreur lors de la récupération des positions:', error);
       } finally {
@@ -168,7 +167,6 @@ export default function ClientSideMap({
     return () => clearInterval(interval);
   }, []);
 
-  // Styles CSS globaux
   useEffect(() => {
     if (typeof document !== 'undefined') {
       const style = document.createElement('style');
@@ -238,14 +236,13 @@ export default function ClientSideMap({
 
         <MapControllerWrapper center={center} zoom={zoom} />
 
-        {/* Positions des équipes */}
         {Array.from(teamPositions.values()).map((team) => (
           <Marker
             key={team.teamId}
             position={[team.latitude, team.longitude]}
             icon={createTeamIcon(team.status)}
           >
-            <Tooltip permanent={team.status === 'inactive'}>
+            <Tooltip>
               <div>
                 <strong>{`Équipe ${team.teamId.split('-')[0]}`}</strong>
                 <div className="text-sm">
@@ -278,7 +275,6 @@ export default function ClientSideMap({
               </Tooltip>
             </Marker>
 
-            {/* Zones de recherche */}
             <Circle 
               center={victimLocation} 
               radius={500}
