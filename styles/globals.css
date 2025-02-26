@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.leaflet-container {
+  height: 100% !important;
+  width: 100% !important;
+  position: absolute !important;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+}
+
+.map-wrapper {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+/* Styles pour la liste des zones */
+.zone-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.zone-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.zone-list::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.1);
+  border-radius: 3px;
+}
+
+.zone-list:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.2);
+}
